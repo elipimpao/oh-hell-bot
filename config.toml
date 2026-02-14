@@ -1,0 +1,260 @@
+# ============================================================
+#  Oh Hell PPO Training — Control Panel
+# ============================================================
+# All training parameters in one place. Values here override
+# built-in defaults. CLI arguments (--flag value) override
+# values in this file.
+#
+#   Precedence: built-in defaults < config.toml < CLI arguments
+# ============================================================
+
+
+[training]
+
+# Total environment timesteps to train for
+total_timesteps = 1_000_000_000
+
+# Number of parallel environments distributed across all workers
+num_envs = 256
+
+# Number of subprocess workers (0 = auto-detect based on CPU count)
+num_workers = 0
+
+# Steps collected per worker per rollout before each PPO update
+steps_per_rollout = 512
+
+# Learning rate for Adam optimizer (annealed linearly to 0 if anneal_lr = true)
+lr = 2.5e-4
+
+# Discount factor for future rewards
+gamma = 0.99
+
+# GAE (Generalized Advantage Estimation) lambda
+gae_lambda = 0.95
+
+# PPO clipping epsilon for both policy and value loss
+clip_eps = 0.2
+
+# Number of PPO optimization epochs per collected rollout
+epochs = 4
+
+# Minibatch size for PPO gradient updates
+minibatch_size = 4096
+
+# Entropy coefficient — higher values encourage exploration
+ent_coef = 0.01
+
+# Value function loss coefficient
+vf_coef = 0.5
+
+# Maximum gradient norm for gradient clipping
+max_grad_norm = 0.5
+
+# Whether to linearly anneal the learning rate to zero over training
+anneal_lr = true
+
+# Random seed for reproducibility
+seed = 42
+
+# Device for training: "auto", "cpu", "cuda", "cuda:0", etc.
+device = "auto"
+
+# Hidden dimension for the neural network's shared encoder layers
+hidden_dim = 512
+
+
+# ============================================================
+#  PFSP (Prioritized Fictitious Self-Play) Settings
+# ============================================================
+# Controls how opponents are selected from the pool. PFSP biases
+# toward harder opponents while maintaining diversity through
+# staleness boosts and exploration bonuses.
+# ============================================================
+
+[pfsp]
+
+# Weight given to opponents with no reward data (exploration bonus).
+# Higher = new/unmeasured opponents get selected more aggressively.
+exploration_bonus = 1.0
+
+# Divisor for the staleness boost: staleness_mult = 1 + min(staleness / divisor, max_mult).
+# Lower divisor = staleness kicks in faster (opponents get re-selected sooner).
+staleness_divisor = 150.0
+
+# Maximum staleness multiplier cap.
+# Total staleness mult ranges from 1.0 to (1.0 + this value).
+max_staleness_multiplier = 1.5
+
+# Number of recent reward measurements to keep per opponent (rolling window).
+# Larger window = smoother but slower-adapting difficulty estimates.
+reward_window = 5
+
+# Maximum number of self-play snapshots in the opponent pool.
+# Oldest snapshots are evicted when this limit is reached.
+pool_size = 100
+
+# Print PFSP pool status (hardest/easiest rankings) every N updates.
+# Each update = steps_per_rollout * num_envs timesteps.
+log_interval = 1
+
+
+# ============================================================
+#  Opponent Composition Settings
+# ============================================================
+# Controls how opponent seats are assigned at each table, and
+# allows forcing specific bot types for guaranteed coverage.
+# ============================================================
+
+[opponents]
+
+# Fraction of tables where ALL seats use the primary (hardest) PFSP config.
+# These homogeneous tables match evaluation conditions (all-same opponent).
+# Set to 0.0 to disable, 1.0 for all homogeneous.
+homogeneous_rate = 0.25
+
+# For non-homogeneous tables, probability that each remaining seat
+# gets the primary (hardest) config instead of a random one.
+# Higher = more seats face the hardest opponent.
+primary_bias = 0.5
+
+# Temperature for NN (self-play snapshot) opponent action sampling.
+# 1.0 = standard sampling from learned policy
+# < 1.0 = more deterministic/greedy (sharpens distribution)
+# > 1.0 = more random/exploratory (flattens distribution)
+nn_temperature = 1.0
+
+
+# Forced homogeneous bot tables — bypass PFSP entirely.
+# These guarantee the agent faces pure bot tables at the specified
+# rates, regardless of what PFSP selects. Critical for ensuring
+# the agent trains against conditions matching evaluation.
+# Rates are fractions of ALL tables (across all envs).
+# Total forced rate should be < 1.0 to leave room for PFSP tables.
+[opponents.forced_homogeneous]
+
+# Fraction of tables forced to be all-SmartBot
+smart = 0.05
+
+# Fraction of tables forced to be all-HeuristicBot
+heuristic = 0.03
+
+# Fraction of tables forced to be all-RandomBot
+random = 0.02
+
+# How aggressively to shift forced budget toward weak (bot,pc) cells.
+# 0.0 = static (original flat rates), 1.0 = fully adaptive.
+adaptation_rate = 0.5
+
+# Minimum unconditional rate per (bot_type, player_count) cell.
+# Prevents any combination from being starved entirely.
+# With 12 cells, 12 * 0.002 = 0.024 < 0.10 total budget, so the floor fits.
+min_cell_rate = 0.002
+
+# Rolling window for per-cell win rate tracking.
+win_window = 50
+
+
+# ============================================================
+#  Self-Play Settings
+# ============================================================
+
+[selfplay]
+
+# Begin saving snapshots to the PFSP pool after this many steps.
+# Before this threshold, only the 3 fixed bots are in the pool.
+self_play_start = 500_000
+
+# Save a new self-play snapshot every N steps.
+# Must be >= 1_000_000 to avoid filename collisions (step is
+# encoded as e.g. "127M" in the filename).
+snapshot_interval = 1_000_000
+
+# Directory for persistent self-play snapshot files (.pt).
+# Snapshots are saved here during training and loaded on startup.
+# Drop snapshot files from other training runs into this folder
+# for cross-run opponent diversity.
+snapshot_dir = "snapshots"
+
+
+# ============================================================
+#  Adaptive Player Count Distribution
+# ============================================================
+# Controls how training games are distributed across player
+# counts (2p, 3p, 4p, 5p). The system tracks per-player-count
+# win rates and shifts training toward weaker player counts.
+# ============================================================
+
+[player_counts]
+
+# Base weights for [2p, 3p, 4p, 5p] game distribution.
+# These are the starting weights and the fallback when not enough data exists.
+base_weights = [0.15, 0.20, 0.30, 0.35]
+
+# How aggressively to shift toward weak player counts (0.0 = static, 1.0 = fully adaptive).
+# Final weights = (1 - rate) * base + rate * weakness_normalized.
+adaptation_rate = 0.5
+
+# Minimum weight per player count. Prevents any count from being starved entirely.
+min_weight = 0.05
+
+# Rolling window size for per-player-count win rate tracking.
+# Larger = smoother but slower to adapt.
+win_window = 50
+
+
+# ============================================================
+#  Evaluation Settings
+# ============================================================
+
+[evaluation]
+
+# Run full evaluation (all player counts x all bot types) every N steps.
+# The live dashboard shows rolling training win rates continuously,
+# so formal eval can run less frequently. Eval uses deterministic play
+# and gives a "true strength" snapshot.
+eval_interval = 10_000_000
+
+# Number of games per player-count per opponent-type during evaluation
+eval_games = 50
+
+
+# ============================================================
+#  Checkpoint Settings
+# ============================================================
+
+[checkpoints]
+
+# Save a training checkpoint every N steps.
+# Must be >= 1_000_000 to avoid filename collisions (step is
+# encoded as e.g. "127M" in the filename).
+checkpoint_interval = 1_000_000
+
+# Directory to save checkpoint files
+save_dir = "checkpoints"
+
+# Optional run name for organizing outputs (empty = auto-generated timestamp)
+run_name = ""
+
+# Path to a checkpoint .pt file to resume from (empty = start fresh)
+resume = ""
+
+
+# ============================================================
+#  League Training Settings
+# ============================================================
+# Used when running train.py as part of a league (via league.py)
+# or when manually loading opponents from external directories.
+# ============================================================
+
+[league]
+
+# Additional snapshot directories to scan for opponents (comma-separated or TOML list).
+# These directories are scanned at startup and periodically during training.
+load_dirs = ""
+
+# Re-scan snapshot directories every N updates to discover new opponents (0 = disabled).
+rescan_interval = 0
+
+# Exploiter mode: no fixed bots, pool filled entirely from loaded snapshots.
+# Used by the exploiter agent in league training.
+exploiter_mode = false

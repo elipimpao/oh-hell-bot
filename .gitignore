@@ -1,0 +1,19 @@
+# Training artifacts
+checkpoints/
+snapshots/
+league_snapshots/
+runs/
+
+# Cython build artifacts
+build/
+*.c
+!*.pyx
+*.pyd
+*.so
+
+# Python
+__pycache__/
+*.pyc
+
+# Personal config (ship league.toml.example instead)
+league.toml

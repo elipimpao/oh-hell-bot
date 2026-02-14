@@ -1,0 +1,65 @@
+# ============================================================
+#  Oh Hell League Training Configuration (Example)
+# ============================================================
+# Copy this file to league.toml and fill in checkpoint paths.
+#
+# Usage: python league.py                  (uses league.toml)
+#        python league.py --config my.toml (custom config)
+# ============================================================
+
+[league]
+
+# Base directory for snapshot exchange between agents.
+# Each agent gets a subdirectory: league_snapshots/main/, league_snapshots/exploiter/
+snapshot_base = "league_snapshots"
+
+
+# ============================================================
+#  Main Agent
+# ============================================================
+# Resumes from an existing checkpoint and continues training
+# with PFSP + fixed bots + self-play. Reads exploiter snapshots
+# via load_dirs so PFSP can train against them.
+# ============================================================
+
+[agents.main]
+role = "main"
+config = "config.toml"
+snapshot_dir = "league_snapshots/main"           # new snapshots go here
+load_dirs = ["league_snapshots/exploiter"]       # read exploiter snapshots
+rescan_interval = 1                              # rescan every update
+
+[agents.main.overrides]
+num_envs = 256          # scale to your CPU (main gets more resources)
+num_workers = 16        # 0 = auto-detect
+seed = 42
+
+# REQUIRED: point to your main agent's latest checkpoint
+# Example: resume = "checkpoints/PPO_ABC123_200M.pt"
+resume = ""
+
+
+# ============================================================
+#  Exploiter Agent
+# ============================================================
+# Trains ONLY against the main agent's snapshots. No fixed bots,
+# no self-play. Discovers and exploits weaknesses in main's play.
+# ============================================================
+
+[agents.exploiter]
+role = "exploiter"
+config = "config.toml"
+load_dirs = ["league_snapshots/main"]            # only main agent's snapshots
+rescan_interval = 1
+
+[agents.exploiter.overrides]
+num_envs = 128          # exploiter can use fewer resources
+num_workers = 8
+minibatch_size = 4096
+seed = 123
+total_timesteps = 1_000_000_000
+snapshot_interval = 1_000_000    # must be >= 1M (filenames use "127M" format)
+
+# REQUIRED: point to the main agent's latest snapshot (starts from its weights)
+# Example: init_weights = "league_snapshots/main/MAIN_ABC123_200M.pt"
+init_weights = ""
