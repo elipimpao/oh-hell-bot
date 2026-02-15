@@ -1,0 +1,162 @@
+/* ── Card base ─────────────────────────────────────────────────────── */
+
+.card {
+    display: inline-block;
+    border-radius: 5px;
+    box-shadow: 1px 2px 5px rgba(0, 0, 0, 0.45);
+    overflow: hidden;
+    background: #fff;
+    transition: transform 0.22s ease, box-shadow 0.22s ease, filter 0.15s ease;
+    flex-shrink: 0;
+    position: relative;
+}
+
+.card-svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+/* ── Sizes ─────────────────────────────────────────────────────────── */
+
+.card-normal { width: var(--card-w, 70px); height: var(--card-h, 100px); }
+.card-small  { width: var(--card-sm-w, 46px); height: var(--card-sm-h, 66px); }
+
+/* ── CSS-rendered card faces ───────────────────────────────────────── */
+
+.card-css {
+    background: #fff;
+}
+
+.card-index {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    line-height: 1;
+    font-family: 'Segoe UI', Arial, sans-serif;
+    font-weight: 700;
+    pointer-events: none;
+}
+
+.card-index-tl {
+    top: 3px;
+    left: 4px;
+}
+
+.card-index-br {
+    bottom: 3px;
+    right: 4px;
+    transform: rotate(180deg);
+}
+
+/* Font sizes scale with card dimensions via custom properties.
+   --card-font-scale defaults to 1.0, adjustable via settings slider. */
+
+.card-normal .card-rank { font-size: calc(var(--card-w, 70px) * 0.21 * var(--card-font-scale, 1)); }
+.card-normal .card-suit { font-size: calc(var(--card-w, 70px) * 0.19 * var(--card-font-scale, 1)); margin-top: -1px; }
+
+.card-small .card-rank { font-size: calc(var(--card-sm-w, 46px) * 0.24 * var(--card-font-scale, 1)); }
+.card-small .card-suit { font-size: calc(var(--card-sm-w, 46px) * 0.22 * var(--card-font-scale, 1)); margin-top: -1px; }
+
+.card-center-suit {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    font-family: 'Segoe UI', Arial, sans-serif;
+}
+
+.card-normal .card-center-suit { font-size: calc(var(--card-w, 70px) * 0.46 * var(--card-font-scale, 1)); }
+.card-small  .card-center-suit { font-size: calc(var(--card-sm-w, 46px) * 0.48 * var(--card-font-scale, 1)); }
+
+/* ── Large card style — prominent rank + suit ─────────────────────── */
+
+.card-style-large .card-index-tl {
+    top: 4px;
+    left: 5px;
+}
+
+.card-style-large .card-index-br {
+    bottom: 4px;
+    right: 5px;
+}
+
+.card-style-large.card-normal .card-rank { font-size: calc(var(--card-w, 70px) * 0.30 * var(--card-font-scale, 1)); }
+.card-style-large.card-normal .card-suit { font-size: calc(var(--card-w, 70px) * 0.24 * var(--card-font-scale, 1)); }
+
+.card-style-large.card-small .card-rank { font-size: calc(var(--card-sm-w, 46px) * 0.32 * var(--card-font-scale, 1)); }
+.card-style-large.card-small .card-suit { font-size: calc(var(--card-sm-w, 46px) * 0.26 * var(--card-font-scale, 1)); }
+
+.card-style-large.card-normal .card-center-suit { font-size: calc(var(--card-w, 70px) * 0.58 * var(--card-font-scale, 1)); }
+.card-style-large.card-small  .card-center-suit { font-size: calc(var(--card-sm-w, 46px) * 0.60 * var(--card-font-scale, 1)); }
+
+/* ── Trump highlight ──────────────────────────────────────────────── */
+
+.card-trump {
+    background: linear-gradient(135deg, #fffde7 0%, #fff9c4 50%, #fff8e1 100%);
+}
+
+/* ── Card back ─────────────────────────────────────────────────────── */
+
+.card-back {
+    background: #1a3068;
+}
+
+.card-back-pattern {
+    width: 100%;
+    height: 100%;
+    border: 2px solid rgba(255, 255, 255, 0.15);
+    border-radius: 3px;
+    box-sizing: border-box;
+    background:
+        repeating-linear-gradient(
+            45deg,
+            transparent,
+            transparent 4px,
+            rgba(255, 255, 255, 0.06) 4px,
+            rgba(255, 255, 255, 0.06) 5px
+        );
+}
+
+/* ── Interactive hand cards (human) ────────────────────────────────── */
+
+.hand-card {
+    position: relative;
+    cursor: pointer;
+    --hover-lift: 0px;
+    --hover-scale: 1;
+    transform:
+        translateX(var(--fan-offset-x, 0px))
+        translateY(calc(var(--fan-lift, 0px) + var(--hover-lift)))
+        rotate(var(--fan-rotation, 0deg))
+        scale(var(--hover-scale));
+    transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.15s ease;
+}
+
+.hand-card.legal:hover {
+    --hover-lift: -20px;
+    --hover-scale: 1.06;
+    box-shadow: 0 0 14px rgba(255, 215, 0, 0.8), 0 4px 10px rgba(0, 0, 0, 0.4);
+    z-index: 100 !important;
+}
+
+.hand-card {
+    overflow: visible; /* override .card's overflow:hidden so hit area extends below */
+}
+
+.hand-card.legal::after {
+    content: '';
+    position: absolute;
+    bottom: -25px;
+    left: -5px;
+    right: -5px;
+    height: 30px;
+    /* invisible hit area prevents hover-flicker when card lifts */
+}
+
+.hand-card.illegal {
+    filter: brightness(0.5);
+    cursor: not-allowed;
+}

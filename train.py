@@ -9,7 +9,9 @@ After a warmup phase against heuristic opponents, switches to mixed self-play.
 import os
 import sys
 import csv
+import json
 import time
+import signal
 import random
 import argparse
 import multiprocessing as mp
@@ -730,7 +732,12 @@ def load_snapshot_dir(snapshot_dir, hidden_dim, pool_size, reward_window):
                   f"(file={file_hidden_dim}, current={hidden_dim})")
             continue
 
-        candidates.append((step, state_dict, filename))
+        # Extract run tag from filename (e.g. "EXP_TAGLK7_1M.pt" -> "TAGLK7")
+        stem = os.path.splitext(filename)[0]
+        parts = stem.split("_")
+        run_tag = parts[1] if len(parts) >= 3 else stem
+
+        candidates.append((step, state_dict, filename, run_tag))
 
     if not candidates:
         return []
@@ -745,18 +752,19 @@ def load_snapshot_dir(snapshot_dir, hidden_dim, pool_size, reward_window):
     # Build pool entries sorted ascending by step (oldest first)
     candidates.reverse()
     entries = []
-    seen_steps = set()
-    for step, state_dict, filename in candidates:
-        if step in seen_steps:
+    seen_keys = set()
+    for step, state_dict, filename, run_tag in candidates:
+        key = (run_tag, step)
+        if key in seen_keys:
             print(f"  Warning: Skipping duplicate step {step} from {filename}")
             continue
-        seen_steps.add(step)
+        seen_keys.add(key)
 
         is_exp = filename.upper().startswith("EXP") or "exploiter" in filename.lower()
         prefix = "EXP" if is_exp else "snap"
         entries.append({
-            "id": f"{prefix}_{_step_tag(step)}", "type": "snapshot",
-            "state_dict": state_dict, "step": step,
+            "id": f"{prefix}_{run_tag}_{_step_tag(step)}", "type": "snapshot",
+            "state_dict": state_dict, "step": step, "run_tag": run_tag,
             "rewards": deque(maxlen=reward_window),
             "win_data": deque(maxlen=reward_window),
             "last_used": 0,
@@ -766,21 +774,22 @@ def load_snapshot_dir(snapshot_dir, hidden_dim, pool_size, reward_window):
 
 
 def load_snapshot_dirs(dirs, hidden_dim, pool_size, reward_window,
-                       existing_steps=None):
-    """Load snapshots from multiple directories, deduplicating by step.
+                       existing_keys=None):
+    """Load snapshots from multiple directories, deduplicating by (run_tag, step).
 
-    Returns up to pool_size new entries (not already in existing_steps),
+    Returns up to pool_size new entries (not already in existing_keys),
     sorted ascending by step.
     """
-    if existing_steps is None:
-        existing_steps = set()
+    if existing_keys is None:
+        existing_keys = set()
     all_entries = []
     for d in dirs:
         entries = load_snapshot_dir(d, hidden_dim, pool_size * 2, reward_window)
         for entry in entries:
-            if entry["step"] not in existing_steps:
+            key = (entry.get("run_tag", ""), entry["step"])
+            if key not in existing_keys:
                 all_entries.append(entry)
-                existing_steps.add(entry["step"])
+                existing_keys.add(key)
     # Keep most recent pool_size
     all_entries.sort(key=lambda e: e["step"], reverse=True)
     if len(all_entries) > pool_size:
@@ -1285,13 +1294,26 @@ def _env_worker(remote, parent_remote, env_count, seed_offset, base_seed,
                              dict(config_win_data), dict(pc_wins),
                              dict(forced_cell_wins)))
 
-    except (EOFError, ConnectionResetError):
+    except (EOFError, ConnectionResetError, BrokenPipeError):
         pass
     finally:
         remote.close()
 
 
+_shutdown_requested = False
+
+
+def _handle_shutdown(signum, frame):
+    """Signal handler for graceful shutdown (used by dashboard)."""
+    global _shutdown_requested
+    _shutdown_requested = True
+
+
 def main():
+    global _shutdown_requested
+    _shutdown_requested = False
+    signal.signal(signal.SIGTERM, _handle_shutdown)
+
     args = parse_args()
     apply_config(args)
 
@@ -1305,6 +1327,7 @@ def main():
     run_name = args.run_name or f"PPO_{_to_base36(int(time.time()))}"
     os.makedirs(args.save_dir, exist_ok=True)
     writer = SummaryWriter(f"runs/{run_name}")
+    print(f"Logging to runs/{run_name}", flush=True)
 
     # CSV log for evaluation
     csv_path = f"runs/{run_name}/eval_log.csv"
@@ -1494,11 +1517,16 @@ def main():
 
     num_updates = args.total_timesteps // (T * N)
     start_time = time.time()
+    _sps_history = deque(maxlen=20)  # (timestamp, step) for rolling SPS
 
     start_update = global_step // (T * N) + 1
     _priority_opponents = []
 
     for update in range(start_update, num_updates + 1):
+        if _shutdown_requested:
+            event_print("[train] Shutdown requested, saving final checkpoint...")
+            break
+
         # Learning rate annealing
         if args.anneal_lr:
             frac = 1.0 - (update - 1) / num_updates
@@ -1516,11 +1544,12 @@ def main():
             if args.snapshot_dir and not args.exploiter_mode:
                 rescan_dirs.append(args.snapshot_dir)
             if rescan_dirs:
-                existing_steps = {e["step"] for e in opponent_pool
-                                  if e["type"] == "snapshot"}
+                existing_keys = {(e.get("run_tag", ""), e["step"])
+                                 for e in opponent_pool
+                                 if e["type"] == "snapshot"}
                 new_entries = load_snapshot_dirs(
                     rescan_dirs, args.hidden_dim, args.pfsp_pool_size,
-                    args.pfsp_reward_window, existing_steps)
+                    args.pfsp_reward_window, existing_keys)
                 if new_entries:
                     snapshot_entries = [e for e in opponent_pool
                                        if e["type"] == "snapshot"]
@@ -1864,7 +1893,13 @@ def main():
         else:
             worker_params["forced_pc_bot_rates"] = None
 
-        sps = int(global_step / (time.time() - start_time))
+        _sps_history.append((time.time(), global_step))
+        if len(_sps_history) >= 2:
+            dt = _sps_history[-1][0] - _sps_history[0][0]
+            ds = _sps_history[-1][1] - _sps_history[0][1]
+            sps = int(ds / dt) if dt > 0 else 0
+        else:
+            sps = int((T * N) / max(time.time() - start_time, 0.01))
         opp_str = "+".join(opp["id"] for opp in all_selected)
         dashboard_text = format_dashboard(
             global_step, sp_active, opp_str, avg_reward,
@@ -1874,6 +1909,43 @@ def main():
             worker_params, min_pc_samples, writer,
             exploiter_mode=args.exploiter_mode)
         dashboard_print(dashboard_text)
+
+        # Write status.json for dashboard GUI (atomic write)
+        _pool_info = []
+        for _e in opponent_pool:
+            _wd = _e.get("win_data", [])
+            _total_raw = sum(rw for _, rw, _ in _wd) if _wd else 0
+            _total_games = sum(g for _, _, g in _wd) if _wd else 0
+            _pool_info.append({
+                "id": _e["id"], "type": _e["type"],
+                "step": _e.get("step", 0),
+                "win_rate": _total_raw / _total_games if _total_games > 0 else None,
+                "games": _total_games,
+            })
+        _status = {
+            "global_step": global_step, "sps": sps,
+            "total_timesteps": args.total_timesteps,
+            "avg_reward": float(avg_reward),
+            "pg_loss": float(np.mean(clip_losses)),
+            "v_loss": float(np.mean(value_losses)),
+            "entropy": float(np.mean(entropy_losses)),
+            "lr": optimizer.param_groups[0]["lr"],
+            "sp_active": sp_active,
+            "pc_win_rates": {str(pc): pc_win_rates.get(pc) for pc in PLAYER_COUNTS},
+            "cell_win_rates": {f"{bk}_{pc}": cell_win_rates.get((bk, pc))
+                               for bk in ("smart", "heuristic", "random")
+                               for pc in PLAYER_COUNTS},
+            "opponent_pool": _pool_info,
+            "run_name": run_name,
+            "timestamp": time.time(),
+        }
+        _status_path = os.path.join(writer.log_dir, "status.json")
+        try:
+            with open(_status_path + ".tmp", "w") as _sf:
+                json.dump(_status, _sf)
+            os.replace(_status_path + ".tmp", _status_path)
+        except OSError:
+            pass
 
         # Snapshot — save to disk (always) and add to own pool (normal mode only)
         if (global_step >= args.self_play_start

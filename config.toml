@@ -121,7 +121,7 @@ primary_bias = 0.5
 # 1.0 = standard sampling from learned policy
 # < 1.0 = more deterministic/greedy (sharpens distribution)
 # > 1.0 = more random/exploratory (flattens distribution)
-nn_temperature = 1.0
+nn_temperature = 1.1
 
 
 # Forced homogeneous bot tables — bypass PFSP entirely.

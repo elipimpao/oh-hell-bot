@@ -25,6 +25,15 @@ A reinforcement learning agent for the card game [Oh Hell](https://en.wikipedia.
 
 - **`train.py`** — PPO training loop (CleanRL-style). Trains across all player counts simultaneously using multiprocessing workers that collect complete rollouts independently with CPU-side agent inference. Uses PFSP for opponent selection with a pool of self-play snapshots and rule-based bots. Includes periodic evaluation against all opponent types plus snapshot evaluation, checkpointing, TensorBoard logging, and CSV eval logs.
 
+### Dashboard & GUIs
+
+- **`dashboard.py`** — Gradio-based training dashboard that runs in any browser. Provides a complete web UI for configuring, launching, monitoring, and managing training runs without touching config files or a terminal. Features 6 tabs: Training (config form + start/pause/resume/stop), Dashboard (live metrics, reward/loss curves, win rate heatmap, per-player-count win rates), Evaluation (historical charts + on-demand eval), Opponent Pool (PFSP pool viewer + snapshot browser), League (independent main + exploiter agent controls), and Settings (config presets, run history, resource monitor, log viewer). Communicates with `train.py` via stdout parsing and `status.json` for real-time metrics.
+
+- **`gui/`** — Web-based game interface using FastAPI + WebSockets. Two modes:
+  - **Play Mode**: Full game simulation where a human plays one seat against configurable AI bots (random, heuristic, smart, or neural network). Bot turns auto-advance with configurable animation speed. Supports custom hand sizes, trump selection, and dev mode (all cards face-up).
+  - **Advisor Mode**: Decision advisor for real-world games. Mirror an ongoing game (e.g., on Trickster Cards), input the game state as it happens, and receive AI recommendations with probability distributions from a trained neural network.
+  - Key files: `server.py` (FastAPI app + WebSocket handler), `session.py` (game simulation), `advisor.py` (NN-based recommendations), `bot_manager.py` (bot creation + model loading), `static/` (HTML/CSS/JS frontend).
+
 ### Utilities
 
 - **`evaluate.py`** — Standalone evaluation and plotting. Evaluates any checkpoint across all player counts against random, heuristic, and smart opponents. Generates a 3x3 training progress plot (score/win rate/bid accuracy vs each opponent type) from CSV logs, with per-player-count lines and aggregate. Includes weakness ranking across all opponent/player-count combinations.
@@ -35,7 +44,7 @@ A reinforcement learning agent for the card game [Oh Hell](https://en.wikipedia.
 
 - **`league.toml`** — League configuration file. Defines agent roles (main vs exploiter), snapshot directories, rescan intervals, load directories, and per-agent config overrides.
 
-- **`requirements.txt`** — Python dependencies: torch, gymnasium, numpy, tqdm, tensorboard, matplotlib, tomli. Optional: cython (for building the accelerated game engine).
+- **`requirements.txt`** — Python dependencies: torch, gymnasium, numpy, tqdm, tensorboard, matplotlib, tomli, gradio, plotly, psutil, fastapi, uvicorn, websockets. Optional: cython (for building the accelerated game engine).
 
 ## Training Flow & Strategy
 
@@ -302,7 +311,7 @@ The system saves two types of files. Understanding the difference is important:
 | **Save interval** | `checkpoint_interval` (default: 1M steps) | `snapshot_interval` (default: 1M steps) |
 | **Safe to delete?** | Only if you won't resume from them | Yes, pool reloads from disk on startup |
 
-Both follow the naming pattern `{run_name}_{step}.pt` (e.g., `PPO_ABC123_127M.pt`). A `_FINAL.pt` file is saved when training completes.
+Checkpoints follow the naming pattern `{run_name}_CHKPT_{step}.pt` (e.g., `PPO_ABC123_CHKPT_127M.pt`). A `_CHKPT_FINAL.pt` file is saved when training completes. Snapshots follow `{run_name}_{step}.pt` (e.g., `PPO_ABC123_127M.pt`).
 
 ### League Training (Main + Exploiter)
 
@@ -358,9 +367,47 @@ Press `Ctrl+C` for graceful shutdown. To resume later:
 
 **Starting a fresh exploiter** (keeping the main agent): Use `init_weights` instead of `resume` for the exploiter. This gives it the main agent's weights but resets its training.
 
+### Training Dashboard (Browser GUI)
+
+The Gradio dashboard provides full training control from a browser — no terminal or config file editing needed.
+
+```bash
+python dashboard.py                  # opens at http://localhost:7860
+python dashboard.py --port 8080      # custom port
+python dashboard.py --share          # create a public Gradio link
+```
+
+**Tab overview:**
+
+| Tab | What it does |
+|-----|-------------|
+| **Training** | Configure all parameters (timesteps, envs, learning rate, opponent composition, player count weights, etc.) via form controls. Start/Pause/Resume/Stop training with one click. Resume from any checkpoint via dropdown. |
+| **Dashboard** | Live metrics updated every 3 seconds: reward & loss curves, entropy & throughput, win rate heatmap (3 bots x 4 player counts), per-player-count win rate bars. Metric cards show current reward, losses, entropy, and SPS. |
+| **Evaluation** | View historical evaluation charts from CSV logs. Run on-demand evaluation of any checkpoint against all bot types and player counts. |
+| **Opponent Pool** | View the current PFSP pool (opponent ID, type, step, win rate, games played). Browse all snapshot files on disk across directories. |
+| **League** | Independent controls for main and exploiter agents. Configure each agent's envs, workers, snapshot directory, load directories, resume checkpoint, and init weights. Start/stop agents independently. |
+| **Settings** | Save/load named config presets. View run history. System resource monitor (CPU, memory, GPU). Scrollable training log output. |
+
+The dashboard communicates with `train.py` through two channels:
+1. **stdout parsing** — regex extracts step, reward, loss, entropy, and SPS from the live training output (powers the top two charts immediately)
+2. **`status.json`** — train.py writes a structured JSON file atomically every update with win rates, opponent pool info, and detailed metrics (powers the win rate heatmap and per-player-count charts after ~10 updates of data accumulation)
+
+### Web Game Interface
+
+A browser-based interface for playing Oh Hell against AI opponents or getting move advice for real games.
+
+```bash
+python gui/run.py                    # opens at http://localhost:8000
+python gui/run.py --port 9000        # custom port
+```
+
+**Play Mode**: Start a game with 2-5 players. You play one seat; the rest are AI bots (configurable: random, heuristic, smart, or neural network from any snapshot). Bot turns auto-advance. Supports custom hand sizes, trump card selection, and a dev mode that shows all cards face-up.
+
+**Advisor Mode**: Mirror a real-world game in progress (e.g., from Trickster Cards). Input the game state step by step — your hand, trump card, bids, cards played — and the neural network recommends optimal bids or card plays with full probability distributions and confidence levels.
+
 ### Evaluation and Monitoring
 
-**Dashboard**: Training prints a live dashboard to stdout showing reward, loss, PFSP pool status, win rates by player count, and opponent selection.
+**Terminal dashboard**: Training prints a live dashboard to stdout showing reward, loss, PFSP pool status, win rates by player count, and opponent selection.
 
 **TensorBoard**: Launch it to see loss curves, reward trends, and evaluation metrics over time:
 ```bash
@@ -377,7 +424,7 @@ python evaluate.py --checkpoint checkpoints/PPO_ABC123_200M.pt
 python evaluate.py --plot runs/PPO_ABC123/eval_log.csv
 ```
 
-**Play GUI**: Get move recommendations from a trained agent for real games:
+**Play GUI (Tkinter)**: Get move recommendations from a trained agent for real games:
 ```bash
 python play.py --checkpoint checkpoints/PPO_ABC123_200M.pt
 ```
@@ -425,6 +472,8 @@ See [config.toml](config.toml) for the full list organized by section: `[trainin
 - [x] **Exploiter agents**: League training with a main agent and exploiter. The exploiter trains exclusively against main agent snapshots to discover weaknesses, and its snapshots are injected into the main agent's PFSP pool. Managed by `league.py` orchestrator.
 - [x] **Cython game engine**: `game_fast.pyx` provides a C-accelerated drop-in replacement for the game engine, reducing per-step overhead in the opponent simulation loop.
 - [x] **Adaptive player count distribution**: Training automatically shifts toward weaker player counts based on rolling win rates.
+- [x] **Training dashboard**: Gradio-based browser UI (`dashboard.py`) for configuring, launching, monitoring, and managing training runs. Includes live metrics, win rate heatmaps, opponent pool viewer, league controls, config presets, and resource monitoring.
+- [x] **Web game interface**: FastAPI + WebSocket browser UI (`gui/`) for playing Oh Hell against AI opponents (Play Mode) and getting real-time move recommendations for live games (Advisor Mode).
 
 ### Future Work
 

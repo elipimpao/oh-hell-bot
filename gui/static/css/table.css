@@ -1,0 +1,326 @@
+/* ── Green felt table ──────────────────────────────────────────────── */
+
+.game-table {
+    position: relative;
+    width: 100%;
+    height: 100vh;
+    background: radial-gradient(ellipse at center, #1a6b2a 0%, #0d4a1a 50%, #072e10 100%);
+    overflow: hidden;
+}
+
+/* ── Player labels ────────────────────────────────────────────────── */
+
+.player-label {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(0, 0, 0, 0.55);
+    padding: 3px 12px;
+    border-radius: 10px;
+    white-space: nowrap;
+    font-size: 13px;
+    color: #ddd;
+}
+
+.player-label.active-player {
+    background: rgba(255, 193, 7, 0.65);
+    color: #1a1a1a;
+    font-weight: 600;
+}
+
+.player-name-text {
+    font-weight: 600;
+}
+
+.dealer-badge {
+    background: #ff9800;
+    color: #1a1a1a;
+    font-size: 10px;
+    font-weight: 700;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.player-bid-info {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.7);
+    margin-left: 2px;
+}
+
+.player-label.active-player .player-bid-info {
+    color: rgba(0, 0, 0, 0.6);
+}
+
+.player-bid-info.on-target { color: #81c784; }
+.player-bid-info.over-target { color: #ef9a9a; }
+.player-label.active-player .player-bid-info.on-target { color: #2e7d32; }
+.player-label.active-player .player-bid-info.over-target { color: #c62828; }
+
+/* ── Human hand (bottom center) ───────────────────────────────────── */
+
+.human-hand {
+    position: absolute;
+    bottom: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    justify-content: center;
+    align-items: flex-end;
+    height: 120px;
+    z-index: 30;
+}
+
+/* ── Opponent hands ───────────────────────────────────────────────── */
+
+.opponent-hand {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.opponent-hand-top    { flex-direction: row; }
+.opponent-hand-bottom { flex-direction: row; }
+.opponent-hand-left   { flex-direction: column; }
+.opponent-hand-right  { flex-direction: column; }
+
+/* ── Trump indicator ──────────────────────────────────────────────── */
+
+.trump-indicator {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    z-index: 18;
+    text-align: center;
+}
+
+.trump-label {
+    font-size: 10px;
+    font-weight: 600;
+    color: #ffd54f;
+    margin-top: 2px;
+}
+
+/* ── Round info (top-right) ───────────────────────────────────────── */
+
+.round-info {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 40;
+    color: #e0e0e0;
+    font-size: 12px;
+    text-align: right;
+    background: rgba(0, 0, 0, 0.45);
+    padding: 8px 12px;
+    border-radius: 8px;
+}
+
+.scores-panel {
+    margin-top: 6px;
+    border-top: 1px solid rgba(255, 255, 255, 0.2);
+    padding-top: 4px;
+}
+
+.scores-title {
+    font-weight: 600;
+    font-size: 11px;
+    color: #ffd54f;
+    margin-bottom: 2px;
+}
+
+.score-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    font-size: 11px;
+    padding: 1px 0;
+}
+
+.score-name { color: #bbb; }
+.score-val  { color: #fff; font-weight: 600; }
+
+/* ── Trick cards (center area) ────────────────────────────────────── */
+
+.trick-card {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    z-index: 15;
+}
+
+/* ── Bid bubble (animated) ────────────────────────────────────────── */
+
+.bid-bubble {
+    position: absolute;
+    transform: translate(-50%, -100%);
+    background: rgba(255, 255, 255, 0.9);
+    color: #1a1a1a;
+    padding: 4px 10px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    z-index: 50;
+    animation: bubbleFade 1.5s ease forwards;
+    pointer-events: none;
+}
+
+@keyframes bubbleFade {
+    0%   { opacity: 0; transform: translate(-50%, -80%); }
+    20%  { opacity: 1; transform: translate(-50%, -100%); }
+    80%  { opacity: 1; }
+    100% { opacity: 0; }
+}
+
+/* ── Controls overlay ─────────────────────────────────────────────── */
+
+.spectator-controls {
+    position: fixed;
+    bottom: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 8px;
+    z-index: 100;
+}
+
+.back-btn {
+    position: fixed;
+    top: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 100;
+    opacity: 0.5;
+    font-size: 12px;
+    padding: 4px 14px;
+}
+
+.back-btn:hover { opacity: 1; }
+
+/* ── Game over ────────────────────────────────────────────────────── */
+
+.game-over-msg {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 48px;
+    font-weight: 700;
+    color: #ffd54f;
+    text-shadow: 2px 2px 8px rgba(0, 0, 0, 0.6);
+}
+
+/* ── Settings gear ────────────────────────────────────────────────── */
+
+.settings-gear {
+    position: fixed;
+    top: 10px;
+    left: 10px;
+    z-index: 200;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.5);
+    color: #ccc;
+    border: none;
+    font-size: 18px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s;
+}
+
+.settings-gear:hover {
+    background: rgba(0, 0, 0, 0.75);
+    color: #fff;
+}
+
+.settings-panel {
+    position: fixed;
+    top: 50px;
+    left: 10px;
+    z-index: 200;
+    background: #1e1e3a;
+    padding: 16px;
+    border-radius: 10px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+    min-width: 220px;
+    font-size: 13px;
+    color: #ddd;
+}
+
+.settings-panel h4 {
+    margin: 0 0 10px;
+    color: #ffd54f;
+    font-size: 14px;
+}
+
+.settings-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.settings-row label {
+    font-size: 12px;
+    color: #bbb;
+}
+
+.settings-row select,
+.settings-row input[type="range"] {
+    width: 110px;
+}
+
+.settings-row select {
+    padding: 3px 6px;
+    background: #2a2a4e;
+    color: #e0e0e0;
+    border: 1px solid #444;
+    border-radius: 4px;
+    font-size: 12px;
+}
+
+.settings-value {
+    font-size: 11px;
+    color: #888;
+    width: 35px;
+    text-align: right;
+}
+
+/* ── Dealer selection (advisor mode) ─────────────────────────────── */
+
+.dealer-selectable {
+    padding: 10px 24px;
+    font-size: 16px;
+    border: 2px solid transparent;
+    transition: all 0.2s ease;
+}
+
+.dealer-selectable:hover {
+    background: rgba(255, 193, 7, 0.5);
+    border-color: #ffc107;
+    color: #fff;
+    transform: translate(-50%, -50%) scale(1.1);
+}
+
+.dealer-select-instruction {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 22px;
+    font-weight: 600;
+    color: #ffd54f;
+    text-shadow: 1px 1px 4px rgba(0, 0, 0, 0.5);
+    text-align: center;
+    pointer-events: auto;
+}
