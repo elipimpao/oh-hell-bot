@@ -34,6 +34,17 @@ A reinforcement learning agent for the card game [Oh Hell](https://en.wikipedia.
   - **Advisor Mode**: Decision advisor for real-world games. Mirror an ongoing game (e.g., on Trickster Cards), input the game state as it happens, and receive AI recommendations with probability distributions from a trained neural network.
   - Key files: `server.py` (FastAPI app + WebSocket handler), `session.py` (game simulation), `advisor.py` (NN-based recommendations), `bot_manager.py` (bot creation + model loading), `static/` (HTML/CSS/JS frontend).
 
+### Chrome Extension (Trickster Cards Integration)
+
+- **`extension/`** — Chrome Extension (Manifest V3) that integrates with [Trickster Cards](https://www.trickstercards.com) to automatically read game state and display AI recommendations as an overlay on the game page. Eliminates manual data entry — the extension intercepts Trickster's console.log events to detect hands, bids, plays, and trick results in real time. Communicates with the existing FastAPI backend via WebSocket through a background service worker. Key files:
+  - `manifest.json` — MV3 manifest targeting `trickstercards.com/game/*`
+  - `inject.js` — Runs in the page's main world. Hooks `console.log` to intercept structured game events (player joins, cards dealt, bids, card plays, trick results) and forwards them via `window.postMessage`. Also handles autoplay DOM interaction (clicking bid buttons and card elements).
+  - `content.js` — Content script: game state machine, seat mapping (handles non-contiguous Trickster seats), trump card detection from DOM (`aria-label` parsing), backend communication via background service worker, recommendation overlay rendering, autoplay scheduling, and settings UI (gear menu with autoplay toggle and delay slider).
+  - `background.js` — MV3 service worker. Handles HTTP/WebSocket communication on behalf of the content script (bypasses mixed-content/CORS restrictions).
+  - `overlay.css` — Styles for the floating recommendation panel, settings menu, toggle switch, delay slider, and AUTO badge.
+  - `popup.html/js/css` — Extension popup for backend URL and snapshot path configuration.
+  - `icons/` — Extension icons (16, 48, 128px).
+
 ### Utilities
 
 - **`evaluate.py`** — Standalone evaluation and plotting. Evaluates any checkpoint across all player counts against random, heuristic, and smart opponents. Generates a 3x3 training progress plot (score/win rate/bid accuracy vs each opponent type) from CSV logs, with per-player-count lines and aggregate. Includes weakness ranking across all opponent/player-count combinations.
@@ -403,7 +414,58 @@ python gui/run.py --port 9000        # custom port
 
 **Play Mode**: Start a game with 2-5 players. You play one seat; the rest are AI bots (configurable: random, heuristic, smart, or neural network from any snapshot). Bot turns auto-advance. Supports custom hand sizes, trump card selection, and a dev mode that shows all cards face-up.
 
-**Advisor Mode**: Mirror a real-world game in progress (e.g., from Trickster Cards). Input the game state step by step — your hand, trump card, bids, cards played — and the neural network recommends optimal bids or card plays with full probability distributions and confidence levels.
+**Advisor Mode**: Mirror a real-world game in progress. Input the game state step by step — your hand, trump card, bids, cards played — and the neural network recommends optimal bids or card plays with full probability distributions and confidence levels. For a hands-free experience on [Trickster Cards](https://www.trickstercards.com), use the Chrome Extension (`extension/`) which feeds game state automatically.
+
+### Chrome Extension (Trickster Cards Advisor)
+
+A Chrome Extension that overlays real-time AI recommendations directly on the [Trickster Cards](https://www.trickstercards.com) game page. No manual data entry — the extension automatically reads all game events from the page.
+
+**Setup:**
+
+1. Start the backend:
+   ```bash
+   python gui/run.py
+   ```
+2. Load the extension in Chrome: `chrome://extensions` → Enable Developer Mode → Load Unpacked → select the `extension/` folder
+3. (Optional) Click the extension icon to configure the backend URL and snapshot path
+
+**How it works:**
+
+The extension intercepts Trickster Cards' structured console.log output to detect game events (player joins, cards dealt, bids, plays, trick results). It maps Trickster's player names and seat numbers to the advisor's internal representation, detects the trump card from the DOM, and feeds everything to the backend's AdvisorSession via WebSocket. When it's your turn, the overlay shows bid or play recommendations with probability distributions.
+
+**Autoplay mode:**
+
+Click the gear icon (⚙) on the overlay to open settings. Enable "Autoplay" to have the extension automatically submit bids and play cards based on the top recommendation. The delay slider (50ms–2000ms) controls how long the recommendation is visible before the extension acts.
+
+**Architecture:**
+
+```
+[Trickster Cards page]
+    │  console.log events
+    ▼
+[inject.js — page world]
+    │  window.postMessage
+    ▼
+[content.js — content script]
+    │  chrome.runtime.connect (Port)
+    ▼
+[background.js — service worker]
+    │  WebSocket to localhost:8000
+    ▼
+[FastAPI backend — gui/server.py]
+    │  AdvisorSession + NN inference
+    ▼
+[Recommendations → content.js overlay]
+```
+
+**Features:**
+- Auto-detects game start, rejoin, and player count changes
+- Handles non-contiguous Trickster seat numbers
+- Recovers from backend restarts (auto-reconnects)
+- Recovers from page refresh mid-game (replays round state from bid order)
+- Trump card auto-detected from DOM with retry logic for dealing animations
+- Draggable, minimizable overlay panel
+- Settings persist across sessions via `chrome.storage.local`
 
 ### Evaluation and Monitoring
 
@@ -474,6 +536,7 @@ See [config.toml](config.toml) for the full list organized by section: `[trainin
 - [x] **Adaptive player count distribution**: Training automatically shifts toward weaker player counts based on rolling win rates.
 - [x] **Training dashboard**: Gradio-based browser UI (`dashboard.py`) for configuring, launching, monitoring, and managing training runs. Includes live metrics, win rate heatmaps, opponent pool viewer, league controls, config presets, and resource monitoring.
 - [x] **Web game interface**: FastAPI + WebSocket browser UI (`gui/`) for playing Oh Hell against AI opponents (Play Mode) and getting real-time move recommendations for live games (Advisor Mode).
+- [x] **Chrome Extension for Trickster Cards**: Manifest V3 extension (`extension/`) that automatically reads game state from the Trickster Cards page via console.log interception and displays AI recommendations as an in-page overlay. Includes autoplay mode with configurable delay.
 
 ### Future Work
 

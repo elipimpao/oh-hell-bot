@@ -4,6 +4,9 @@ snapshots/
 league_snapshots/
 runs/
 
+# ONNX exports
+*.onnx
+
 # Cython build artifacts
 build/
 *.c

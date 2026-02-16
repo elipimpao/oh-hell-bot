@@ -790,12 +790,18 @@ def load_snapshot_dirs(dirs, hidden_dim, pool_size, reward_window,
             if key not in existing_keys:
                 all_entries.append(entry)
                 existing_keys.add(key)
-    # Keep most recent pool_size
-    all_entries.sort(key=lambda e: e["step"], reverse=True)
-    if len(all_entries) > pool_size:
-        all_entries = all_entries[:pool_size]
-    all_entries.reverse()  # oldest first
-    return all_entries
+    # Category-aware truncation: EXP (exploiter) entries get a guaranteed
+    # sub-quota so they aren't crowded out by higher-step MAIN entries.
+    exp = [e for e in all_entries if e["id"].startswith("EXP")]
+    non_exp = [e for e in all_entries if not e["id"].startswith("EXP")]
+    exp.sort(key=lambda e: e["step"], reverse=True)
+    non_exp.sort(key=lambda e: e["step"], reverse=True)
+
+    exp_quota = pool_size // 3
+    non_exp_quota = pool_size - min(len(exp), exp_quota)
+    kept = non_exp[:non_exp_quota] + exp[:exp_quota]
+    kept.sort(key=lambda e: e["step"])  # oldest first (original contract)
+    return kept
 
 
 def pfsp_select(pool, update_num, exploration_bonus=2.0,
@@ -1522,24 +1528,23 @@ def main():
     start_update = global_step // (T * N) + 1
     _priority_opponents = []
 
-    for update in range(start_update, num_updates + 1):
-        if _shutdown_requested:
-            event_print("[train] Shutdown requested, saving final checkpoint...")
-            break
+    def _select_and_send(update_num):
+        """Select opponents via PFSP and send collect command to workers.
 
-        # Learning rate annealing
-        if args.anneal_lr:
-            frac = 1.0 - (update - 1) / num_updates
-            lr = frac * args.lr
-            for pg in optimizer.param_groups:
-                pg["lr"] = lr
+        Encapsulates: agent weight snapshot, snapshot-dir rescan, PFSP
+        opponent selection, opp_configs building, and sending the collect
+        command to all workers.
 
-        # Prepare agent weights for workers
+        Returns all_selected (list of opponent entries) on success,
+        or None if no opponents are available (exploiter-mode skip).
+        """
+        nonlocal sp_active
+
         agent_sd = {k: v.cpu().clone() for k, v in network.state_dict().items()}
 
         # Pre-selection rescan: check for new snapshots before choosing opponents
         if (args.rescan_interval > 0
-                and update % args.rescan_interval == 0):
+                and update_num % args.rescan_interval == 0):
             rescan_dirs = list(args.load_dirs)
             if args.snapshot_dir and not args.exploiter_mode:
                 rescan_dirs.append(args.snapshot_dir)
@@ -1555,7 +1560,15 @@ def main():
                                        if e["type"] == "snapshot"]
                     total_after = len(snapshot_entries) + len(new_entries)
                     while total_after > args.pfsp_pool_size and snapshot_entries:
-                        oldest = min(snapshot_entries, key=lambda e: e["step"])
+                        # Prefer evicting non-EXP entries so exploiter
+                        # snapshots aren't crowded out by high-step MAIN entries
+                        non_exp = [e for e in snapshot_entries
+                                   if not e["id"].startswith("EXP")]
+                        if non_exp:
+                            oldest = min(non_exp, key=lambda e: e["step"])
+                        else:
+                            oldest = min(snapshot_entries,
+                                         key=lambda e: e["step"])
                         opponent_pool.remove(oldest)
                         snapshot_entries.remove(oldest)
                         total_after -= 1
@@ -1577,49 +1590,41 @@ def main():
             if snapshots:
                 latest = max(snapshots, key=lambda e: e["step"])
                 all_selected = [latest]
-                latest["last_used"] = update
+                latest["last_used"] = update_num
         else:
             # Force-play new exploiter snapshots first
             while _priority_opponents and len(all_selected) < 3:
                 prio = _priority_opponents.pop(0)
                 if any(e is prio for e in opponent_pool):
                     all_selected.append(prio)
-                    prio["last_used"] = update
+                    prio["last_used"] = update_num
 
-            # Reserve one slot for the hardest exploiter (if any exist)
+            # Reserve one slot for the latest exploiter snapshot.
+            # Pick from the newest run (highest run_tag, which is a
+            # base36 timestamp), then the highest step within that run.
+            # This ensures a freshly started exploiter always gets the
+            # dedicated slot over older runs with more accumulated steps.
             if not all_selected:
                 exploiters = [e for e in opponent_pool
                               if e["id"].startswith("EXP")]
                 if exploiters:
-                    # Pick the exploiter with lowest win rate (hardest)
-                    best_exp = None
-                    best_wr = float("inf")
-                    for e in exploiters:
-                        wd = e.get("win_data", [])
-                        if len(wd) > 0:
-                            total_adj = sum(a for a, _, _ in wd)
-                            total_games = sum(g for _, _, g in wd)
-                            wr = total_adj / total_games if total_games > 0 else 0.5
-                        else:
-                            wr = 0.0  # untested = assume hard
-                        if wr < best_wr:
-                            best_wr = wr
-                            best_exp = e
-                    if best_exp is not None:
-                        all_selected.append(best_exp)
-                        best_exp["last_used"] = update
+                    best_exp = max(exploiters,
+                                   key=lambda e: (e.get("run_tag", ""),
+                                                  e["step"]))
+                    all_selected.append(best_exp)
+                    best_exp["last_used"] = update_num
 
             # Fill remaining slots with PFSP-weighted selection
             remaining_pool = [e for e in opponent_pool if e not in all_selected]
             for _ in range(min(3 - len(all_selected), len(remaining_pool))):
-                opp = pfsp_select(remaining_pool, update,
+                opp = pfsp_select(remaining_pool, update_num,
                                   args.pfsp_exploration_bonus,
                                   args.pfsp_staleness_divisor,
                                   args.pfsp_max_staleness_multiplier)
                 if opp is None:
                     break
                 all_selected.append(opp)
-                opp["last_used"] = update
+                opp["last_used"] = update_num
                 remaining_pool = [e for e in remaining_pool if e is not opp]
 
         # Build opponent configs (index 0 = primary/hardest)
@@ -1633,18 +1638,35 @@ def main():
                     sp_active = True
                     print(f"  Self-play activated at step {global_step} (PFSP)")
 
-        # Guard: empty pool (possible in exploiter mode before rescan finds opponents)
+        # Guard: empty pool (exploiter mode before rescan finds opponents)
         if not opp_configs:
             if args.exploiter_mode:
                 event_print("  Warning: no opponents in pool, skipping update")
-                global_step += T * N
-                continue
+                return None
             else:
                 opp_configs = [("heuristic", None)]
 
         # Send collect command to all workers
         for remote in parent_remotes:
             remote.send(("collect", agent_sd, opp_configs, T, worker_params))
+        return all_selected
+
+    # Async double-buffering: kick off first rollout collection
+    _inflight_selected = _select_and_send(start_update)
+    _collect_inflight = _inflight_selected is not None
+
+    for update in range(start_update, num_updates + 1):
+        if _shutdown_requested:
+            event_print("[train] Shutdown requested, saving final checkpoint...")
+            break
+
+        # Handle exploiter mode skip (no opponents available)
+        if _inflight_selected is None:
+            global_step += T * N
+            if update < num_updates and not _shutdown_requested:
+                _inflight_selected = _select_and_send(update + 1)
+                _collect_inflight = _inflight_selected is not None
+            continue
 
         # Receive complete rollouts from all workers
         last_obs_parts = []
@@ -1695,6 +1717,22 @@ def main():
             np.concatenate(last_obs_parts)).to(device)
         current_masks = torch.from_numpy(
             np.concatenate(last_mask_parts)).to(device)
+
+        rollout_selected = _inflight_selected
+        _collect_inflight = False
+
+        # Async double-buffering: send next collect immediately.
+        # Workers start collecting the next rollout while GPU trains on this one.
+        if update < num_updates and not _shutdown_requested:
+            _inflight_selected = _select_and_send(update + 1)
+            _collect_inflight = _inflight_selected is not None
+
+        # Learning rate annealing
+        if args.anneal_lr:
+            frac = 1.0 - (update - 1) / num_updates
+            lr = frac * args.lr
+            for pg in optimizer.param_groups:
+                pg["lr"] = lr
 
         # Compute GAE
         with torch.no_grad():
@@ -1784,12 +1822,12 @@ def main():
         writer.add_scalar("train/lr", optimizer.param_groups[0]["lr"], global_step)
 
         # Update PFSP reward (kept for diagnostics)
-        for i, opp in enumerate(all_selected):
+        for i, opp in enumerate(rollout_selected):
             if i in final_config_rewards:
                 opp["rewards"].append(final_config_rewards[i])
 
         # Update PFSP win data (used for opponent selection)
-        for i, opp in enumerate(all_selected):
+        for i, opp in enumerate(rollout_selected):
             if i in all_config_win_data:
                 entries = all_config_win_data[i]
                 sum_adj = sum(a for a, _ in entries)
@@ -1900,7 +1938,7 @@ def main():
             sps = int(ds / dt) if dt > 0 else 0
         else:
             sps = int((T * N) / max(time.time() - start_time, 0.01))
-        opp_str = "+".join(opp["id"] for opp in all_selected)
+        opp_str = "+".join(opp["id"] for opp in rollout_selected)
         dashboard_text = format_dashboard(
             global_step, sp_active, opp_str, avg_reward,
             np.mean(clip_losses), np.mean(value_losses), np.mean(entropy_losses), sps,
@@ -1974,7 +2012,13 @@ def main():
                 snapshot_entries = [e for e in opponent_pool
                                     if e["type"] == "snapshot"]
                 if len(snapshot_entries) >= args.pfsp_pool_size:
-                    oldest = min(snapshot_entries, key=lambda e: e["step"])
+                    non_exp = [e for e in snapshot_entries
+                               if not e["id"].startswith("EXP")]
+                    if non_exp:
+                        oldest = min(non_exp, key=lambda e: e["step"])
+                    else:
+                        oldest = min(snapshot_entries,
+                                     key=lambda e: e["step"])
                     opponent_pool.remove(oldest)
                 opponent_pool.append(snap_entry)
 
@@ -1982,8 +2026,8 @@ def main():
             event_print(f"  -> Saved snapshot {snap_path} "
                        f"(pool: {len(opponent_pool)} total, {snap_count} snapshots)")
 
-        # Periodic evaluation across all player counts
-        if global_step % args.eval_interval < T * N:
+        # Periodic evaluation across all player counts (skip for exploiter)
+        if not args.exploiter_mode and global_step % args.eval_interval < T * N:
             network.eval()
             event_print(f"  Evaluating at step {global_step} (all player counts)...")
 
@@ -2055,6 +2099,15 @@ def main():
             }
             torch.save(ckpt, path)
             event_print(f"  -> Checkpoint saved: {path}")
+
+    # Drain any inflight rollout that workers are still collecting
+    # (happens when shutdown is requested while workers are mid-collect)
+    if _collect_inflight:
+        for remote in parent_remotes:
+            try:
+                remote.recv()
+            except (EOFError, BrokenPipeError, ConnectionResetError):
+                pass
 
     # Cleanup workers
     for remote in parent_remotes:

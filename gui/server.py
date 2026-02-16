@@ -7,6 +7,7 @@ import traceback
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 
@@ -19,6 +20,14 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
 app = FastAPI(title="Oh Hell GUI")
+
+# CORS: allow the Chrome extension (running on trickstercards.com) to reach this server
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Serve static files
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -115,13 +124,14 @@ async def game_ws(websocket: WebSocket, session_id: str):
         while True:
             data = await websocket.receive_text()
             msg = json.loads(data)
-            response = session.handle_message(msg)
-            await websocket.send_json(response)
+            try:
+                response = session.handle_message(msg)
+                await websocket.send_json(response)
+            except Exception as e:
+                traceback.print_exc()
+                await websocket.send_json({"type": "error", "message": str(e)})
 
     except WebSocketDisconnect:
         pass
     except Exception as e:
-        try:
-            await websocket.send_json({"type": "error", "message": str(e)})
-        except Exception:
-            pass
+        traceback.print_exc()

@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "Oh Hell Advisor",
+  "version": "1.0.0",
+  "description": "RL agent recommendations for Oh Hell on Trickster Cards",
+  "permissions": ["storage"],
+  "host_permissions": ["http://localhost:8000/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.trickstercards.com/game/*"],
+      "js": ["inject.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["*://*.trickstercards.com/game/*"],
+      "js": ["content.js"],
+      "css": ["overlay.css"],
+      "run_at": "document_start"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Oh Hell Advisor Settings"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

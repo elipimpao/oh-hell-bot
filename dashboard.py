@@ -306,14 +306,18 @@ class TrainingManager:
             pass
 
     def _find_latest_checkpoint(self):
-        """Find the most recent checkpoint file."""
-        patterns = [
-            os.path.join(self.project_dir, "checkpoints", "*_CHKPT_*.pt"),
-            os.path.join(self.project_dir, "checkpoints", "*_FINAL.pt"),
-        ]
+        """Find the most recent checkpoint file across all subdirectories."""
+        base = os.path.join(self.project_dir, "checkpoints")
+        dirs = [base]
+        if os.path.isdir(base):
+            for entry in os.listdir(base):
+                full = os.path.join(base, entry)
+                if os.path.isdir(full):
+                    dirs.append(full)
         files = []
-        for p in patterns:
-            files.extend(glob.glob(p))
+        for d in dirs:
+            for pat in ["*_CHKPT_*.pt", "*_FINAL.pt"]:
+                files.extend(glob.glob(os.path.join(d, pat)))
         if not files:
             return None
         return max(files, key=os.path.getmtime)
@@ -349,6 +353,10 @@ class LeagueManager:
         role_prefix = "EXP" if role == "exploiter" else "MAIN"
         run_name = f"{role_prefix}_{_to_base36(int(time.time()))}"
         cmd += ["--run-name", run_name]
+
+        # Checkpoint dir: each role saves to its own subdirectory
+        save_dir = os.path.join("checkpoints", name)
+        cmd += ["--save-dir", save_dir]
 
         # Role-specific flags
         if role == "exploiter":
@@ -410,15 +418,28 @@ class LeagueManager:
 #  Utility functions
 # ============================================================
 
-def discover_checkpoints():
-    """Find all checkpoint files, sorted newest first."""
-    patterns = [
-        os.path.join(PROJECT_DIR, "checkpoints", "*_CHKPT_*.pt"),
-        os.path.join(PROJECT_DIR, "checkpoints", "*_FINAL.pt"),
-    ]
+def discover_checkpoints(subdirs=None):
+    """Find all checkpoint files, sorted newest first.
+
+    Args:
+        subdirs: List of subdirectory names under checkpoints/ to search.
+                 None searches checkpoints/ root and all subdirectories.
+    """
+    base = os.path.join(PROJECT_DIR, "checkpoints")
+    if subdirs is not None:
+        dirs = [os.path.join(base, s) for s in subdirs]
+    else:
+        # Search root + all subdirectories
+        dirs = [base]
+        if os.path.isdir(base):
+            for entry in os.listdir(base):
+                full = os.path.join(base, entry)
+                if os.path.isdir(full):
+                    dirs.append(full)
     files = []
-    for p in patterns:
-        files.extend(glob.glob(p))
+    for d in dirs:
+        for pat in ["*_CHKPT_*.pt", "*_FINAL.pt"]:
+            files.extend(glob.glob(os.path.join(d, pat)))
     result = []
     for f in files:
         result.append({
@@ -509,9 +530,15 @@ def read_eval_csv(run_name):
     return data if data else None
 
 
-def checkpoint_choices():
-    """Return list of checkpoint names for dropdown."""
-    ckpts = discover_checkpoints()
+def checkpoint_choices(role=None):
+    """Return list of checkpoint names for dropdown.
+
+    Args:
+        role: "main" or "exploiter" to filter by subdirectory.
+              None returns all checkpoints.
+    """
+    subdirs = [role] if role else None
+    ckpts = discover_checkpoints(subdirs=subdirs)
     return [c["name"] for c in ckpts]
 
 
@@ -923,9 +950,14 @@ def build_ui():
                 cfg = gather_config(*values)
                 resume = cfg.pop("_resume", None)
                 if resume:
-                    # Resolve to full path
-                    full = os.path.join(PROJECT_DIR, "checkpoints", resume)
-                    if not os.path.exists(full):
+                    # Resolve to full path: check subdirs then root
+                    full = None
+                    for sub in ["main", "exploiter", ""]:
+                        p = os.path.join(PROJECT_DIR, "checkpoints", sub, resume)
+                        if os.path.exists(p):
+                            full = p
+                            break
+                    if not full:
                         full = resume  # user may have typed full path
                     return manager.start(cfg, resume_path=full)
                 return manager.start(cfg)
@@ -1004,9 +1036,15 @@ def build_ui():
             def on_eval_run(ckpt_name, n_games, device):
                 if not ckpt_name:
                     return "Select a checkpoint first."
-                ckpt_path = os.path.join(PROJECT_DIR, "checkpoints", ckpt_name)
-                if not os.path.exists(ckpt_path):
-                    return f"Checkpoint not found: {ckpt_path}"
+                # Check subdirs then root
+                ckpt_path = None
+                for sub in ["main", "exploiter", ""]:
+                    p = os.path.join(PROJECT_DIR, "checkpoints", sub, ckpt_name)
+                    if os.path.exists(p):
+                        ckpt_path = p
+                        break
+                if not ckpt_path:
+                    return f"Checkpoint not found: {ckpt_name}"
                 try:
                     result = subprocess.run(
                         [sys.executable, "evaluate.py",
@@ -1081,9 +1119,11 @@ def build_ui():
                 # Main agent
                 with gr.Column():
                     gr.Markdown("#### Main Agent")
+                    _main_ckpts = checkpoint_choices("main")
                     main_resume = gr.Dropdown(
                         label="Resume Checkpoint",
-                        choices=checkpoint_choices(),
+                        choices=_main_ckpts,
+                        value=_main_ckpts[0] if _main_ckpts else None,
                         allow_custom_value=True)
                     main_envs = gr.Number(label="Num Envs", value=256,
                                           precision=0)
@@ -1106,14 +1146,33 @@ def build_ui():
                 # Exploiter agent
                 with gr.Column():
                     gr.Markdown("#### Exploiter Agent")
-                    exp_init = gr.Dropdown(
-                        label="Init Weights (snapshot)",
-                        choices=[s["name"] for s in discover_snapshots()],
-                        allow_custom_value=True)
+                    _exp_ckpts = checkpoint_choices("exploiter")
+                    _exp_snaps = [s["name"] for s in discover_snapshots()]
+                    with gr.Row():
+                        exp_no_resume = gr.Checkbox(
+                            label="Do not resume from checkpoint",
+                            value=False)
+                        exp_resume = gr.Dropdown(
+                            label="Resume Checkpoint",
+                            choices=_exp_ckpts,
+                            value=_exp_ckpts[0] if _exp_ckpts else None,
+                            allow_custom_value=True)
+                    with gr.Row(visible=False) as exp_init_row:
+                        exp_no_init = gr.Checkbox(
+                            label="Start from scratch",
+                            value=False)
+                        exp_init = gr.Dropdown(
+                            label="Init Weights (snapshot)",
+                            choices=_exp_snaps,
+                            value=_exp_snaps[0] if _exp_snaps else None,
+                            allow_custom_value=True)
                     exp_envs = gr.Number(label="Num Envs", value=128,
                                          precision=0)
                     exp_workers = gr.Number(label="Num Workers", value=8,
                                             precision=0)
+                    exp_snap_dir = gr.Textbox(
+                        label="Snapshot Dir",
+                        value="league_snapshots/exploiter")
                     exp_load_dirs = gr.Textbox(
                         label="Load Dirs",
                         value="league_snapshots/main")
@@ -1128,6 +1187,24 @@ def build_ui():
                     exp_status = gr.Textbox(label="Exploiter Status",
                                             interactive=False, lines=3)
 
+                    def on_no_resume_toggle(checked):
+                        # When "do not resume" is checked, disable dropdown
+                        # and show the init weights row
+                        return (gr.update(interactive=not checked,
+                                          value=None if checked else gr.update()),
+                                gr.update(visible=checked))
+
+                    def on_no_init_toggle(checked):
+                        return gr.update(interactive=not checked,
+                                         value=None if checked else gr.update())
+
+                    exp_no_resume.change(on_no_resume_toggle,
+                                         inputs=exp_no_resume,
+                                         outputs=[exp_resume, exp_init_row])
+                    exp_no_init.change(on_no_init_toggle,
+                                       inputs=exp_no_init,
+                                       outputs=exp_init)
+
             league_refresh_btn = gr.Button("Refresh League Checkpoints",
                                            size="sm")
             league_stop_all_btn = gr.Button("Stop All Agents",
@@ -1135,11 +1212,22 @@ def build_ui():
             league_output = gr.Textbox(label="League Output",
                                        interactive=False, lines=3)
 
+            def _resolve_checkpoint(name, role):
+                """Resolve a checkpoint name to full path, checking role subdir first."""
+                if not name:
+                    return None
+                # Check role-specific subdir first
+                p = os.path.join(PROJECT_DIR, "checkpoints", role, name)
+                if os.path.exists(p):
+                    return p
+                # Fall back to root checkpoints/ (legacy)
+                p = os.path.join(PROJECT_DIR, "checkpoints", name)
+                if os.path.exists(p):
+                    return p
+                return name  # user may have typed full path
+
             def start_main(resume, envs, workers, snap_dir, load_dirs):
-                resume_path = None
-                if resume:
-                    p = os.path.join(PROJECT_DIR, "checkpoints", resume)
-                    resume_path = p if os.path.exists(p) else resume
+                resume_path = _resolve_checkpoint(resume, "main")
                 return league_mgr.start_agent(
                     "main", "main",
                     {"num_envs": int(envs), "num_workers": int(workers)},
@@ -1148,9 +1236,13 @@ def build_ui():
                     load_dirs=load_dirs,
                 )
 
-            def start_exploiter(init_w, envs, workers, load_dirs, total):
+            def start_exploiter(no_resume, resume, no_init, init_w, envs,
+                                workers, snap_dir, load_dirs, total):
+                resume_path = None
+                if not no_resume and resume:
+                    resume_path = _resolve_checkpoint(resume, "exploiter")
                 init_path = None
-                if init_w:
+                if not no_init and not resume_path and init_w:
                     # Try multiple directories
                     for d in ["league_snapshots/main", "snapshots"]:
                         p = os.path.join(PROJECT_DIR, d, init_w)
@@ -1163,7 +1255,9 @@ def build_ui():
                     "exploiter", "exploiter",
                     {"num_envs": int(envs), "num_workers": int(workers),
                      "total_timesteps": int(total)},
+                    resume_path=resume_path,
                     init_weights=init_path,
+                    snapshot_dir=snap_dir,
                     load_dirs=load_dirs,
                 )
 
@@ -1177,9 +1271,12 @@ def build_ui():
                 return league_mgr.stop_all()
 
             def refresh_league():
-                ckpts = checkpoint_choices()
+                main_ckpts = checkpoint_choices("main")
+                exp_ckpts = checkpoint_choices("exploiter")
                 snaps = [s["name"] for s in discover_snapshots()]
-                return gr.update(choices=ckpts), gr.update(choices=snaps)
+                return (gr.update(choices=main_ckpts),
+                        gr.update(choices=exp_ckpts),
+                        gr.update(choices=snaps))
 
             main_start_btn.click(
                 start_main,
@@ -1188,14 +1285,16 @@ def build_ui():
                 outputs=league_output)
             exp_start_btn.click(
                 start_exploiter,
-                inputs=[exp_init, exp_envs, exp_workers,
-                        exp_load_dirs, exp_total_ts],
+                inputs=[exp_no_resume, exp_resume, exp_no_init, exp_init,
+                        exp_envs, exp_workers, exp_snap_dir, exp_load_dirs,
+                        exp_total_ts],
                 outputs=league_output)
             main_stop_btn.click(stop_main, outputs=league_output)
             exp_stop_btn.click(stop_exploiter, outputs=league_output)
             league_stop_all_btn.click(stop_all_league, outputs=league_output)
             league_refresh_btn.click(refresh_league,
-                                     outputs=[main_resume, exp_init])
+                                     outputs=[main_resume, exp_resume,
+                                              exp_init])
 
         # ---- Tab 6: Settings ----
         with gr.Tab("Settings"):

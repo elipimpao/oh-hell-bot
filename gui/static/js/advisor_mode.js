@@ -194,6 +194,9 @@ class AdvisorMode {
         // WebSocket
         const wsUrl = `ws://${window.location.host}/ws/${this.sessionId}`;
         this.ws = new WebSocket(wsUrl);
+        this.ws.onopen = () => this._log('WS: connected');
+        this.ws.onclose = (e) => this._log(`WS: closed code=${e.code} reason=${e.reason}`);
+        this.ws.onerror = () => this._log('WS: error');
         this.ws.onmessage = (event) => this._onMessage(JSON.parse(event.data));
 
         // Start wizard
@@ -216,16 +219,22 @@ class AdvisorMode {
     }
 
     _onMessage(msg) {
-        this._log(`RECV: type=${msg.type}`);
-        if (msg.type === 'advisor_state') {
+        if (msg.type === 'error') {
+            this._log(`RECV ERROR: ${msg.message}`);
+            console.error('Advisor error:', msg.message);
+        } else if (msg.type === 'advisor_state') {
+            this._log(`RECV: advisor_state`);
             this.state = msg.state;
         } else if (msg.type === 'bid_recommendation') {
+            const top = msg.recommendations[0];
+            this._log(`RECV: bid_rec top=Bid${top.bid}(${(top.prob*100).toFixed(1)}%) val=${msg.value.toFixed(3)}`);
             this._showRecommendation(msg, 'bid');
         } else if (msg.type === 'play_recommendation') {
+            const top = msg.recommendations[0];
+            this._log(`RECV: play_rec top=${Card.displayName(top.card)}(${(top.prob*100).toFixed(1)}%) val=${msg.value.toFixed(3)}`);
             this._showRecommendation(msg, 'play');
-        } else if (msg.type === 'error') {
-            this._log(`ERROR: ${msg.message}`);
-            console.error('Advisor error:', msg.message);
+        } else {
+            this._log(`RECV: type=${msg.type}`);
         }
     }
 
@@ -685,6 +694,7 @@ class AdvisorMode {
     }
 
     _recordPlay(player, cardInt) {
+        this._log(`PLAY: player=${player} card=${Card.displayName(cardInt)} hand=[${Array.from(this.selectedHand).map(c => Card.displayName(c)).join(',')}]`);
         this._send({ action: 'record_play', player: player, card: cardInt });
         this.usedCards.add(cardInt);
         if (this.selectedHand.has(cardInt)) {
@@ -990,9 +1000,11 @@ class AdvisorMode {
     // ── WebSocket send ──────────────────────────────────────────────────
 
     _send(msg) {
-        this._log(`SEND: ${JSON.stringify(msg)}`);
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this._log(`SEND: ${JSON.stringify(msg)}`);
             this.ws.send(JSON.stringify(msg));
+        } else {
+            this._log(`SEND FAILED (ws closed): ${JSON.stringify(msg)}`);
         }
     }
 
@@ -1055,6 +1067,7 @@ class AdvisorMode {
         this.bidIndex--;
         const prevBidder = this.bidOrder[this.bidIndex];
         this._log(`UNDO_BID player=${prevBidder} was=${this.bids[prevBidder]}`);
+        this._send({ action: 'undo_bid', player: prevBidder });
         this.bids[prevBidder] = -1;
         this._renderPhase();
     }
@@ -1064,6 +1077,7 @@ class AdvisorMode {
         if (cards.length === 0) return;
         const [player, cardInt] = cards.pop();
         this._log(`UNDO_PLAY player=${player} card=${Card.displayName(cardInt)}`);
+        this._send({ action: 'undo_play', player: player, card: cardInt });
         this.usedCards.delete(cardInt);
         // Restore to player's hand if it was my card
         if (player === this.mySeat && this._savedHand && this._savedHand.has(cardInt)) {

@@ -83,6 +83,12 @@ def build_agent_command(agent_name, agent_cfg, league_cfg):
                               os.path.join(snapshot_base, agent_name))
     cmd += ["--snapshot-dir", snap_dir]
 
+    # Checkpoint dir: each agent saves checkpoints to its own subdirectory
+    checkpoint_base = league_cfg.get("checkpoint_base", "checkpoints")
+    checkpoint_dir = agent_cfg.get("checkpoint_dir",
+                                    os.path.join(checkpoint_base, agent_name))
+    cmd += ["--save-dir", checkpoint_dir]
+
     # Load dirs: read other agents' snapshots
     load_dirs = agent_cfg.get("load_dirs", [])
     if load_dirs:

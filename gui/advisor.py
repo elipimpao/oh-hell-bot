@@ -88,6 +88,11 @@ class AdvisorSession:
             self.bids[player] = bid
             return {"type": "advisor_state", "state": self._get_state_for_frontend()}
 
+        elif action == "undo_bid":
+            player = msg["player"]
+            self.bids[player] = -1
+            return {"type": "advisor_state", "state": self._get_state_for_frontend()}
+
         elif action == "record_play":
             player = msg["player"]
             card = msg["card"]
@@ -114,6 +119,20 @@ class AdvisorSession:
                 result["trick_cards"] = [[p, c] for p, c in trick_cards]
                 result["state"] = self._get_state_for_frontend()
             return result
+
+        elif action == "undo_play":
+            player = msg["player"]
+            card = msg["card"]
+            # Remove from current trick
+            self.current_trick = [(p, c) for p, c in self.current_trick
+                                  if not (p == player and c == card)]
+            self.cards_seen.discard(card)
+            self.cards_played_by[player].discard(card)
+            # Restore to hand if it was my card
+            if player == self.my_seat and card not in self.hand:
+                self.hand.append(card)
+                self.hand.sort()
+            return {"type": "advisor_state", "state": self._get_state_for_frontend()}
 
         elif action == "new_round":
             self._reset_round()
@@ -177,6 +196,18 @@ class AdvisorSession:
         if self.network is None:
             return {"type": "error", "message": "No model loaded."}
 
+        if self.trump_suit < 0:
+            return {"type": "error", "message": "Trump card not set yet."}
+
+        try:
+            return self._build_and_infer(phase)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return {"type": "error", "message": f"Recommendation failed: {type(e).__name__}: {e}"}
+
+    def _build_and_infer(self, phase):
+        """Build synthetic game state and run NN inference (inner)."""
         # Construct synthetic OhHellGame
         game = OhHellGame(self.num_players, rng=random.Random(0))
         game.dealer = self.dealer
@@ -186,11 +217,29 @@ class AdvisorSession:
         game.trump_broken = self.trump_broken
         game.hands = [[] for _ in range(self.num_players)]
         game.hands[self.my_seat] = sorted(self.hand)
-        game.bids = list(self.bids)
+        # For bid recommendations, remove user's own bid if already recorded
+        # (can happen during rejoin when events arrive out of order)
+        bids = list(self.bids)
+        if phase == "bid" and bids[self.my_seat] >= 0:
+            bids[self.my_seat] = -1
+        game.bids = bids
         game.tricks_won = list(self.tricks_won)
         game.cards_played_this_round = set(self.cards_seen)
         game.cards_played_by = [set(s) for s in self.cards_played_by]
-        game.current_trick = list(self.current_trick)
+        # For play recommendations, remove user's card from current_trick if already
+        # recorded (can happen during rejoin when card_played fires before player_turn)
+        current_trick = list(self.current_trick)
+        if phase == "play":
+            user_play = [(p, c) for p, c in current_trick if p == self.my_seat]
+            if user_play:
+                card = user_play[0][1]
+                current_trick = [(p, c) for p, c in current_trick if p != self.my_seat]
+                game.cards_played_this_round.discard(card)
+                game.cards_played_by[self.my_seat].discard(card)
+                if card not in game.hands[self.my_seat]:
+                    game.hands[self.my_seat].append(card)
+                    game.hands[self.my_seat].sort()
+        game.current_trick = current_trick
         game.phase = Phase.BIDDING if phase == "bid" else Phase.PLAYING
         game.trick_leader = self.trick_leader if self.trick_leader >= 0 else (self.dealer + 1) % self.num_players
         game.bid_order = [(self.dealer + 1 + i) % self.num_players for i in range(self.num_players)]

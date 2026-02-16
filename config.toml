@@ -91,7 +91,7 @@ reward_window = 5
 
 # Maximum number of self-play snapshots in the opponent pool.
 # Oldest snapshots are evicted when this limit is reached.
-pool_size = 100
+pool_size = 150
 
 # Print PFSP pool status (hardest/easiest rankings) every N updates.
 # Each update = steps_per_rollout * num_envs timesteps.
@@ -121,7 +121,7 @@ primary_bias = 0.5
 # 1.0 = standard sampling from learned policy
 # < 1.0 = more deterministic/greedy (sharpens distribution)
 # > 1.0 = more random/exploratory (flattens distribution)
-nn_temperature = 1.1
+nn_temperature = 1.0
 
 
 # Forced homogeneous bot tables — bypass PFSP entirely.
@@ -143,7 +143,7 @@ random = 0.02
 
 # How aggressively to shift forced budget toward weak (bot,pc) cells.
 # 0.0 = static (original flat rates), 1.0 = fully adaptive.
-adaptation_rate = 0.5
+adaptation_rate = 0.7
 
 # Minimum unconditional rate per (bot_type, player_count) cell.
 # Prevents any combination from being starved entirely.
@@ -192,7 +192,7 @@ base_weights = [0.15, 0.20, 0.30, 0.35]
 
 # How aggressively to shift toward weak player counts (0.0 = static, 1.0 = fully adaptive).
 # Final weights = (1 - rate) * base + rate * weakness_normalized.
-adaptation_rate = 0.5
+adaptation_rate = 0.7
 
 # Minimum weight per player count. Prevents any count from being starved entirely.
 min_weight = 0.05
@@ -229,7 +229,8 @@ eval_games = 50
 # encoded as e.g. "127M" in the filename).
 checkpoint_interval = 1_000_000
 
-# Directory to save checkpoint files
+# Directory to save checkpoint files.
+# For league training, this is overridden per agent (e.g. checkpoints/main/, checkpoints/exploiter/).
 save_dir = "checkpoints"
 
 # Optional run name for organizing outputs (empty = auto-generated timestamp)
