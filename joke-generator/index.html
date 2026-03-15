@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Joke Generator</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      min-height: 100vh;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .container {
+      background: white;
+      border-radius: 20px;
+      padding: 40px;
+      max-width: 600px;
+      width: 100%;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    }
+
+    h1 {
+      text-align: center;
+      color: #333;
+      margin-bottom: 8px;
+      font-size: 2rem;
+    }
+
+    .subtitle {
+      text-align: center;
+      color: #888;
+      margin-bottom: 30px;
+      font-size: 0.95rem;
+    }
+
+    .input-group {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 30px;
+    }
+
+    input[type="text"] {
+      flex: 1;
+      padding: 14px 20px;
+      border: 2px solid #e0e0e0;
+      border-radius: 12px;
+      font-size: 1rem;
+      outline: none;
+      transition: border-color 0.3s;
+    }
+
+    input[type="text"]:focus {
+      border-color: #667eea;
+    }
+
+    button {
+      padding: 14px 28px;
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      color: white;
+      border: none;
+      border-radius: 12px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.2s, box-shadow 0.2s;
+      white-space: nowrap;
+    }
+
+    button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+    }
+
+    button:active {
+      transform: translateY(0);
+    }
+
+    button:disabled {
+      opacity: 0.7;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+
+    .joke-card {
+      background: #f8f9ff;
+      border-radius: 16px;
+      padding: 30px;
+      min-height: 120px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      border: 2px dashed #e0e0e0;
+      transition: all 0.3s;
+    }
+
+    .joke-card.has-joke {
+      border: none;
+      background: linear-gradient(135deg, #f5f7ff 0%, #f0e6ff 100%);
+    }
+
+    .joke-card p {
+      font-size: 1.15rem;
+      line-height: 1.6;
+      color: #444;
+    }
+
+    .joke-card .placeholder {
+      color: #bbb;
+      font-style: italic;
+    }
+
+    .joke-card .setup {
+      font-weight: 600;
+      color: #333;
+      margin-bottom: 12px;
+    }
+
+    .joke-card .punchline {
+      color: #764ba2;
+      font-weight: 500;
+    }
+
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 4px solid #e0e0e0;
+      border-top-color: #667eea;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .history {
+      margin-top: 30px;
+    }
+
+    .history h3 {
+      color: #333;
+      margin-bottom: 12px;
+      font-size: 0.95rem;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .history-item {
+      background: #f8f9ff;
+      border-radius: 10px;
+      padding: 16px;
+      margin-bottom: 10px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .history-item:hover {
+      background: #eef0ff;
+    }
+
+    .history-item .topic-tag {
+      display: inline-block;
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      color: white;
+      padding: 2px 10px;
+      border-radius: 20px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    .history-item p {
+      font-size: 0.9rem;
+      color: #555;
+      line-height: 1.4;
+    }
+
+    @media (max-width: 500px) {
+      .container { padding: 24px; }
+      h1 { font-size: 1.5rem; }
+      .input-group { flex-direction: column; }
+      button { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Joke Generator</h1>
+    <p class="subtitle">Enter a topic and get a randomly generated joke!</p>
+
+    <div class="input-group">
+      <input type="text" id="topicInput" placeholder="e.g. cats, programming, pizza..." autofocus>
+      <button id="generateBtn" onclick="generateJoke()">Generate</button>
+    </div>
+
+    <div class="joke-card" id="jokeCard">
+      <p class="placeholder">Your joke will appear here...</p>
+    </div>
+
+    <div class="history" id="historySection" style="display: none;">
+      <h3>Previous Jokes</h3>
+      <div id="historyList"></div>
+    </div>
+  </div>
+
+  <script>
+    const jokeDatabase = {
+      templates: [
+        { setup: "Why did the {topic} go to school?", punchline: "Because it wanted to be a little {adj}er!" },
+        { setup: "What do you call a {topic} that can sing?", punchline: "A {topic}-star!" },
+        { setup: "How does a {topic} stay cool?", punchline: "It uses its {topic}-fan!" },
+        { setup: "What did the {topic} say to the other {topic}?", punchline: "\"Stop being so {adj}, you're making me {emotion}!\"" },
+        { setup: "Why don't {topic}s ever win at poker?", punchline: "Because they always show their {topic}-face!" },
+        { setup: "What's a {topic}'s favorite type of music?", punchline: "{adj} rock!" },
+        { setup: "I told my friend a joke about {topic}s.", punchline: "It was so funny, they {past_action} for hours!" },
+        { setup: "A {topic} walks into a bar.", punchline: "The bartender says, \"We don't serve {topic}s here.\" The {topic} replies, \"That's fine, I'll just have a drink instead!\"" },
+        { setup: "What's the difference between a {topic} and a trampoline?", punchline: "You take off your shoes before jumping on a trampoline!" },
+        { setup: "I tried to make a belt out of {topic}s.", punchline: "It was a waist of {topic}s!" },
+        { setup: "My {topic} told me a joke yesterday.", punchline: "I didn't laugh, but the {topic} next to it cracked up!" },
+        { setup: "What do you get when you cross a {topic} with a snowman?", punchline: "Frostbitten {topic}s!" },
+        { setup: "Why was the {topic} so good at math?", punchline: "Because it had a lot of {adj} problems to solve!" },
+        { setup: "How do {topic}s communicate?", punchline: "Through {topic}-mail!" },
+        { setup: "What did the judge say to the {topic}?", punchline: "\"Order in the {topic}!\"" },
+        { setup: "Why did the {topic} break up with the calendar?", punchline: "Because its days were numbered!" },
+        { setup: "I asked a {topic} for directions.", punchline: "It told me to take a {adj} left and keep going until I get lost!" },
+        { setup: "What do {topic}s eat for breakfast?", punchline: "{adj}-cakes with a side of {topic} juice!" },
+        { setup: "I bought a {topic} online.", punchline: "The reviews said it was {adj}, but I think it was just {emotion}-worthy!" },
+        { setup: "Why did the {topic} sit in the corner?", punchline: "Because it was told to be a little more {adj}!" }
+      ],
+      adjectives: [
+        "ridiculous", "sneaky", "dramatic", "fancy", "wild", "cheesy",
+        "clumsy", "grumpy", "silly", "sassy", "funky", "spicy",
+        "crispy", "fluffy", "chunky", "wacky", "groovy", "salty"
+      ],
+      emotions: [
+        "laugh", "cry", "snort", "giggle", "wheeze", "cackle",
+        "chuckle", "howl", "squeal", "gasp"
+      ],
+      pastActions: [
+        "laughed", "cried", "rolled on the floor", "snorted milk",
+        "fell off their chair", "couldn't breathe", "lost it completely",
+        "spit out their coffee", "wheezed uncontrollably"
+      ]
+    };
+
+    const history = [];
+
+    function pickRandom(arr) {
+      return arr[Math.floor(Math.random() * arr.length)];
+    }
+
+    function generateJokeText(topic) {
+      const template = pickRandom(jokeDatabase.templates);
+      const adj = pickRandom(jokeDatabase.adjectives);
+      const emotion = pickRandom(jokeDatabase.emotions);
+      const pastAction = pickRandom(jokeDatabase.pastActions);
+
+      const replacements = {
+        "{topic}": topic,
+        "{adj}": adj,
+        "{emotion}": emotion,
+        "{past_action}": pastAction
+      };
+
+      let setup = template.setup;
+      let punchline = template.punchline;
+
+      for (const [key, value] of Object.entries(replacements)) {
+        setup = setup.replaceAll(key, value);
+        punchline = punchline.replaceAll(key, value);
+      }
+
+      return { setup, punchline };
+    }
+
+    function generateJoke() {
+      const input = document.getElementById("topicInput");
+      const topic = input.value.trim();
+      if (!topic) {
+        input.focus();
+        input.style.borderColor = "#ff6b6b";
+        setTimeout(() => input.style.borderColor = "#e0e0e0", 1500);
+        return;
+      }
+
+      const card = document.getElementById("jokeCard");
+      const btn = document.getElementById("generateBtn");
+
+      btn.disabled = true;
+      btn.textContent = "Generating...";
+      card.className = "joke-card";
+      card.innerHTML = '<div class="spinner"></div>';
+
+      // Simulate a short delay for fun
+      setTimeout(() => {
+        const joke = generateJokeText(topic);
+
+        card.className = "joke-card has-joke";
+        card.innerHTML = `
+          <div>
+            <p class="setup">${escapeHtml(joke.setup)}</p>
+            <p class="punchline">${escapeHtml(joke.punchline)}</p>
+          </div>
+        `;
+
+        btn.disabled = false;
+        btn.textContent = "Generate";
+
+        // Add to history
+        history.unshift({ topic, ...joke });
+        if (history.length > 10) history.pop();
+        renderHistory();
+      }, 600 + Math.random() * 400);
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement("div");
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    function renderHistory() {
+      if (history.length <= 1) return;
+
+      const section = document.getElementById("historySection");
+      const list = document.getElementById("historyList");
+      section.style.display = "block";
+
+      list.innerHTML = history.slice(1).map(joke => `
+        <div class="history-item">
+          <span class="topic-tag">${escapeHtml(joke.topic)}</span>
+          <p>${escapeHtml(joke.setup)}</p>
+          <p><em>${escapeHtml(joke.punchline)}</em></p>
+        </div>
+      `).join("");
+    }
+
+    // Allow Enter key to generate
+    document.getElementById("topicInput").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") generateJoke();
+    });
+  </script>
+</body>
+</html>
